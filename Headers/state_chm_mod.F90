@@ -26,7 +26,7 @@ MODULE State_Chm_Mod
   USE PhysConstants                      ! Physical constants
   USE Precision_Mod                      ! GEOS-Chem precision types
   USE Registry_Mod                       ! Registry module
-  USE Species_Mod                        ! For species database object
+  USE Species_Mod                        ! For species database and conc objects
 
   IMPLICIT NONE
   PRIVATE
@@ -115,6 +115,10 @@ MODULE State_Chm_Mod
      ! Chemical species
      !-----------------------------------------------------------------------
      REAL(fp),          POINTER :: Species    (:,:,:,:) ! Species concentration
+                                                        !  [kg/kg dry air]
+!ewlspc
+     TYPE(SpcConc),     POINTER :: SpeciesVec (:      ) ! Vector for species
+                                                        ! concentrations
                                                         !  [kg/kg dry air]
      CHARACTER(LEN=20)          :: Spc_Units            ! Species units
 
@@ -393,6 +397,8 @@ CONTAINS
     ! Species-based quantities
     State_Chm%SpcData           => NULL()
     State_Chm%Species           => NULL()
+!ewlspc
+    State_Chm%SpeciesVec        => NULL()
     State_Chm%Spc_Units         =  ''
     State_Chm%BoundaryCond      => NULL()
 
@@ -781,6 +787,30 @@ CONTAINS
        CALL GC_Error( errMsg, RC, thisLoc )
        RETURN
     ENDIF
+
+!ewlspc
+    chmID = 'SpeciesConc'
+    ! Loop over all species...
+    ! Need to add suffix to chmID so unique. Is this going to mess up
+    ! diagnostics? Need to make sure we don't output state_chm%species.
+    ! for now do not register.
+    DO N = 1, State_Chm%nSpecies
+       chmID = 'SpeciesConc'//TRIM(State_Chm%SpcData(N)%Info%Name)
+       CALL Init_and_Register(                                               &
+            Input_Opt  = Input_Opt,                                          &
+            State_Chm  = State_Chm,                                          &
+            State_Grid = State_Grid,                                         &
+            chmId      = chmId,                                              &
+            Ptr2Data   = State_Chm%SpeciesVec(N)%Conc,                       &
+            noRegister = .TRUE.,                                             &
+            RC         = RC                                                 )
+       
+       IF ( RC /= GC_SUCCESS ) THEN
+          errMsg = TRIM( errMsg_ir ) // TRIM( chmId )
+          CALL GC_Error( errMsg, RC, thisLoc )
+          RETURN
+       ENDIF
+    ENDDO
 
 #ifdef ADJOINT
     !========================================================================
@@ -2623,7 +2653,7 @@ CONTAINS
 !
 ! !LOCAL VARAIBLES
 !
-    ! Strings
+    INTEGER            :: N
     CHARACTER(LEN=255) :: ErrMsg, ThisLoc
 
     !=======================================================================
@@ -2754,6 +2784,17 @@ CONTAINS
        IF ( RC /= GC_SUCCESS ) RETURN
        State_Chm%Species => NULL()
     ENDIF
+
+!ewlspc
+    DO N = 1, State_Chm%nSpecies
+       IF ( ASSOCIATED( State_Chm%SpeciesVec(N)%Conc ) ) THEN
+          DEALLOCATE( State_Chm%SpeciesVec(N)%Conc, STAT=RC )
+          ! ewl: Technically should append to this name
+          CALL GC_CheckVar( 'State_Chm%SpeciesVec', 2, RC )
+          IF ( RC /= GC_SUCCESS ) RETURN
+          State_Chm%SpeciesVec(N)%Conc => NULL()
+       ENDIF
+    ENDDO
 
     IF ( ASSOCIATED( State_Chm%BoundaryCond ) ) THEN
        DEALLOCATE( State_Chm%BoundaryCond, STAT=RC )
